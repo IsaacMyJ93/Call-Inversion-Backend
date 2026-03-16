@@ -13,4 +13,17 @@ const activosController = require('../controllers/activosController');
  */
 router.get('/', activosController.getAllActivos);
 
+/**
+ * POST /api/activos
+ * Crea un nuevo activo en la base de datos.
+ * @route POST /api/activos
+ */
+router.post('/', activosController.createActivo);
+
+// PUT: Actualizar un activo por ID
+router.put('/:id', activosController.updateActivo);
+
+// DELETE: Borrar un activo por ID
+router.delete('/:id', activosController.deleteActivo);
+
 module.exports = router;
