@@ -5,12 +5,17 @@
 
 require('dotenv').config();
 const express = require('express');
-const activosRoutes = require('./routes/activos');
 
+// 1. Importaciones de rutas (unificadas apuntando a la carpeta src)
+const activosRoutes = require('./routes/activos');
+const calculadoraRoutes = require('./routes/calculadora');
+
+// 2. Inicialización de Express
 const app = express();
 const PORT = process.env.PORT || 8080;
 
-app.use(express.json());
+// 3. Middlewares
+app.use(express.json()); // Permite a Express leer los JSON que enviamos en el Body
 
 /**
  * GET /api/status
@@ -23,15 +28,14 @@ app.get('/api/status', (req, res) => {
 });
 
 /**
- * Rutas de activos
- * @module routes/activos
+ * 4. Rutas principales de la API
  */
 app.use('/api/activos', activosRoutes);
+app.use('/api/calculadora', calculadoraRoutes);
 
 /**
  * Starts the Express server.
  * @function
- * @param {number} PORT - The port on which the server listens.
  */
 app.listen(PORT, () => {
     console.log(`Servidor encendido en http://127.0.0.1:${PORT}`);
