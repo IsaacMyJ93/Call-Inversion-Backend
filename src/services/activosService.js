@@ -95,7 +95,15 @@ exports.calcularProyeccion = async (capital, beneficioEsperado, riesgo) => {
         });
     }
 
-    // 4. Empaquetamos todo listo para el Frontend
+    // información limpia para la interfaz
+    const carteraRecomendada = activosDb.map(activo => ({
+        simbolo: activo.simbolo,
+        nombre: activo.nombre,
+        // Red de seguridad: si rentabilidad es null, usa 0 antes de multiplicar
+        rentabilidadAsignada: `${((activo.rentabilidad || 0) * 100).toFixed(2)}%`
+    }));
+
+    // 4. Empaquetamos todo listo para el Frontend (Añadiendo la cartera)
     return {
         parametros: { capitalInicial: capital, objetivo: objetivoTotal, riesgoElegido: riesgo },
         resultados: {
@@ -103,6 +111,7 @@ exports.calcularProyeccion = async (capital, beneficioEsperado, riesgo) => {
             rentabilidadMediaAplicada: `${(rentabilidadMediaReal * 100).toFixed(2)}%`,
             peorCaidaEstimada: `${(drawdownMedioReal * 100).toFixed(2)}%`
         },
+        cartera: carteraRecomendada, // <--- ¡AQUÍ ESTÁ LA MAGIA NUEVA!
         historicoGrafica: datosGrafica
     };
 };
