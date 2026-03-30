@@ -10,7 +10,6 @@ const activosDao = require('../dao/activosDao');
  * @returns {Promise<{data: Array, error: Error|null}>}
  */
 exports.fetchAllActivos = async () => {
-    // El Service SOLO habla con el DAO, nunca con Supabase directamente
     return await activosDao.getAllActivos();
 };
 
@@ -21,9 +20,6 @@ exports.fetchAllActivos = async () => {
  * @returns {Promise<{data: Array, error: Error|null}>}
  */
 exports.addActivo = async (activoData) => {
-    // Aquí en el futuro podríamos validar cosas, por ejemplo:
-    // if (!activoData.simbolo) throw new Error("Falta el símbolo");
-    
     return await activosDao.createActivo(activoData);
 };
 
@@ -47,59 +43,66 @@ exports.removeActivo = async (id) => {
 };
 
 /**
- * Calcula la proyección de inversión basada en el perfil de riesgo.
+ * Calcula la proyección de inversión basada en el perfil de riesgo conectando con Supabase.
+ * @async
  * @param {number} capital - Dinero inicial invertido.
  * @param {number} beneficioEsperado - Dinero extra que se quiere ganar.
  * @param {string} riesgo - "Bajo", "Medio" o "Alto".
- * @returns {Object} JSON con el tiempo estimado y los datos para la gráfica.
+ * @returns {Promise<Object>} JSON con el tiempo estimado y los datos para la gráfica.
  */
-exports.calcularProyeccion = (capital, beneficioEsperado, riesgo) => {
-    // 1. Definimos el comportamiento histórico de nuestros 3 grupos (MVP)
-    const metricasRiesgo = {
-        "Bajo":  { rentabilidadAnual: 0.04, drawdownMaximo: -0.02 }, // Gana un 4%, cae máximo un 2%
-        "Medio": { rentabilidadAnual: 0.08, drawdownMaximo: -0.10 }, // Gana un 8%, cae un 10%
-        "Alto":  { rentabilidadAnual: 0.15, drawdownMaximo: -0.25 }  // Gana un 15%, pero puede caer un 25%
-    };
+exports.calcularProyeccion = async (capital, beneficioEsperado, riesgo) => {
+    
+    // 1. Pedimos a la BD todos los activos que coincidan con el riesgo elegido
+    const { data: activosDb, error } = await activosDao.getActivosByRiesgo(riesgo);
+    
+    if (error || !activosDb || activosDb.length === 0) {
+        throw new Error(`No hay activos guardados en la base de datos para el riesgo: ${riesgo}`);
+    }
 
-    const perfil = metricasRiesgo[riesgo];
-    if (!perfil) throw new Error("Nivel de riesgo no válido");
+    // 2. Calculamos la media real sumando todos los valores y dividiendo
+    let sumaRentabilidad = 0;
+    let sumaDrawdown = 0;
 
+    activosDb.forEach(activo => {
+        // Red de seguridad: si la columna está vacía, usamos 0 para que no dé error NaN
+        const rentabilidadActivo = activo.rentabilidad || 0; 
+        const drawdownActivo = activo.drawdown || 0;
+
+        sumaRentabilidad += rentabilidadActivo; 
+        sumaDrawdown += drawdownActivo; 
+    });
+
+    const rentabilidadMediaReal = sumaRentabilidad / activosDb.length;
+    const drawdownMedioReal = sumaDrawdown / activosDb.length;
+
+    // 3. Aplicamos la matemática con los datos reales extraídos
     const objetivoTotal = capital + beneficioEsperado;
     let capitalActual = capital;
     let año = 0;
-    
-    // Aquí guardaremos los puntos exactos para pintar la gráfica
     const datosGrafica = [{ año: 0, valor: capital }];
 
-    // 2. Simulamos el paso del tiempo hasta alcanzar el objetivo
-    // Le ponemos un límite de 50 años para que el servidor no se quede pillado en un bucle infinito
     while (capitalActual < objetivoTotal && año < 50) {
         año++;
-        
-        // Aplicamos la rentabilidad de ese año
-        capitalActual = capitalActual * (1 + perfil.rentabilidadAnual);
+        capitalActual = capitalActual * (1 + rentabilidadMediaReal);
 
-        // Simulamos un Drawdown (caída del mercado) cada 3 años para darle realismo a la gráfica
         if (año % 3 === 0) {
-            capitalActual = capitalActual * (1 + perfil.drawdownMaximo);
+            capitalActual = capitalActual * (1 + drawdownMedioReal);
         }
 
-        // Guardamos el punto exacto de este año para la gráfica
         datosGrafica.push({ 
             año: año, 
-            valor: parseFloat(capitalActual.toFixed(2)) // Redondeamos a 2 decimales
+            valor: parseFloat(capitalActual.toFixed(2)) 
         });
     }
 
-    // 3. Empaquetamos todo listo para el Frontend
+    // 4. Empaquetamos todo listo para el Frontend
     return {
         parametros: { capitalInicial: capital, objetivo: objetivoTotal, riesgoElegido: riesgo },
         resultados: {
             añosEstimados: año,
-            mensaje: `Alcanzarás tu objetivo en aproximadamente ${año} años asumiendo un riesgo ${riesgo}.`,
-            rentabilidadMediaAplicada: `${perfil.rentabilidadAnual * 100}%`,
-            peorCaidaEstimada: `${perfil.drawdownMaximo * 100}%`
+            rentabilidadMediaAplicada: `${(rentabilidadMediaReal * 100).toFixed(2)}%`,
+            peorCaidaEstimada: `${(drawdownMedioReal * 100).toFixed(2)}%`
         },
-        historicoGrafica: datosGrafica // <--- ESTO ES LO QUE MARCOS NECESITA
+        historicoGrafica: datosGrafica
     };
 };
