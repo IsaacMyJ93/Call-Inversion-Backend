@@ -59,23 +59,42 @@ exports.calcularProyeccion = async (capital, beneficioEsperado, riesgo) => {
         throw new Error(`No hay activos guardados en la base de datos para el riesgo: ${riesgo}`);
     }
 
-    // 2. Calculamos la media real sumando todos los valores y dividiendo
-    let sumaRentabilidad = 0;
-    let sumaDrawdown = 0;
+    
+    // 2. Calculamos los pesos (Ponderación Inversa al Riesgo) y las medias reales
+    let sumaInversos = 0;
 
+    // Paso A: Calcular el inverso del riesgo (drawdown) de cada activo
     activosDb.forEach(activo => {
-        // Red de seguridad: si la columna está vacía, usamos 0 para que no dé error NaN
-        const rentabilidadActivo = activo.rentabilidad || 0; 
-        const drawdownActivo = activo.drawdown || 0;
-
-        sumaRentabilidad += rentabilidadActivo; 
-        sumaDrawdown += drawdownActivo; 
+        // Usamos Math.abs para quitar el negativo. Si es 0, usamos 0.01 para no dividir por cero
+        const dd = Math.abs(activo.drawdown || 0.01);
+        activo.inversoDrawdown = 1 / dd;
+        sumaInversos += activo.inversoDrawdown;
     });
 
-    const rentabilidadMediaReal = sumaRentabilidad / activosDb.length;
-    const drawdownMedioReal = sumaDrawdown / activosDb.length;
+    let rentabilidadMediaReal = 0;
+    let drawdownMedioReal = 0;
 
-    // 3. Aplicamos la matemática con los datos reales extraídos
+    // Paso B: Asignar el porcentaje de dinero a cada activo y calcular la media global
+    const carteraRecomendada = activosDb.map(activo => {
+        const peso = activo.inversoDrawdown / sumaInversos; // Nos da un porcentaje de 0 a 1
+
+        // Sumamos a la media global la parte proporcional de este activo
+        rentabilidadMediaReal += (activo.rentabilidad || 0) * peso;
+        drawdownMedioReal += (activo.drawdown || 0) * peso;
+
+        // Calculamos el dinero exacto que toca poner en este activo
+        const dineroAsignado = capital * peso;
+
+        return {
+            simbolo: activo.simbolo,
+            nombre: activo.nombre,
+            rentabilidadAsignada: `${((activo.rentabilidad || 0) * 100).toFixed(2)}%`,
+            pesoCartera: `${(peso * 100).toFixed(2)}%`,
+            capitalAsignado: `${dineroAsignado.toFixed(2)} €`
+        };
+    });
+
+    // 3. Aplicamos la matemática de proyección con las medias ponderadas
     const objetivoTotal = capital + beneficioEsperado;
     let capitalActual = capital;
     let año = 0;
@@ -95,15 +114,7 @@ exports.calcularProyeccion = async (capital, beneficioEsperado, riesgo) => {
         });
     }
 
-    // información limpia para la interfaz
-    const carteraRecomendada = activosDb.map(activo => ({
-        simbolo: activo.simbolo,
-        nombre: activo.nombre,
-        // Red de seguridad: si rentabilidad es null, usa 0 antes de multiplicar
-        rentabilidadAsignada: `${((activo.rentabilidad || 0) * 100).toFixed(2)}%`
-    }));
-
-    // 4. Empaquetamos todo listo para el Frontend (Añadiendo la cartera)
+    // 4. Empaquetado todo listo para el Frontend
     return {
         parametros: { capitalInicial: capital, objetivo: objetivoTotal, riesgoElegido: riesgo },
         resultados: {
@@ -111,7 +122,7 @@ exports.calcularProyeccion = async (capital, beneficioEsperado, riesgo) => {
             rentabilidadMediaAplicada: `${(rentabilidadMediaReal * 100).toFixed(2)}%`,
             peorCaidaEstimada: `${(drawdownMedioReal * 100).toFixed(2)}%`
         },
-        cartera: carteraRecomendada, // <--- ¡AQUÍ ESTÁ LA MAGIA NUEVA!
+        cartera: carteraRecomendada, 
         historicoGrafica: datosGrafica
     };
 };
