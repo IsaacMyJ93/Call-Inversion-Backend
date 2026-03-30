@@ -6,15 +6,17 @@
 require('dotenv').config();
 const express = require('express');
 
-// 1. Importaciones de rutas (unificadas apuntando a la carpeta src)
+// 1. Importaciones de rutas y librerías
 const activosRoutes = require('./routes/activos');
 const calculadoraRoutes = require('./routes/calculadora');
+const cors = require('cors'); // <-- Importado correctamente
 
 // 2. Inicialización de Express
 const app = express();
 const PORT = process.env.PORT || 8080;
 
-// 3. Middlewares
+// 3. Middlewares (¡El orden importa!)
+app.use(cors()); // <-- ¡AQUÍ ES EL SITIO PERFECTO! Damos permiso al frontend de Marcos.
 app.use(express.json()); // Permite a Express leer los JSON que enviamos en el Body
 
 /**
