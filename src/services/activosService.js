@@ -10,7 +10,6 @@ const activosDao = require('../dao/activosDao');
  * @returns {Promise<{data: Array, error: Error|null}>}
  */
 exports.fetchAllActivos = async () => {
-    // El Service SOLO habla con el DAO, nunca con Supabase directamente
     return await activosDao.getAllActivos();
 };
 
@@ -21,9 +20,6 @@ exports.fetchAllActivos = async () => {
  * @returns {Promise<{data: Array, error: Error|null}>}
  */
 exports.addActivo = async (activoData) => {
-    // Aquí en el futuro podríamos validar cosas, por ejemplo:
-    // if (!activoData.simbolo) throw new Error("Falta el símbolo");
-    
     return await activosDao.createActivo(activoData);
 };
 
@@ -47,59 +43,86 @@ exports.removeActivo = async (id) => {
 };
 
 /**
- * Calcula la proyección de inversión basada en el perfil de riesgo.
+ * Calcula la proyección de inversión basada en el perfil de riesgo conectando con Supabase.
+ * @async
  * @param {number} capital - Dinero inicial invertido.
  * @param {number} beneficioEsperado - Dinero extra que se quiere ganar.
  * @param {string} riesgo - "Bajo", "Medio" o "Alto".
- * @returns {Object} JSON con el tiempo estimado y los datos para la gráfica.
+ * @returns {Promise<Object>} JSON con el tiempo estimado y los datos para la gráfica.
  */
-exports.calcularProyeccion = (capital, beneficioEsperado, riesgo) => {
-    // 1. Definimos el comportamiento histórico de nuestros 3 grupos (MVP)
-    const metricasRiesgo = {
-        "Bajo":  { rentabilidadAnual: 0.04, drawdownMaximo: -0.02 }, // Gana un 4%, cae máximo un 2%
-        "Medio": { rentabilidadAnual: 0.08, drawdownMaximo: -0.10 }, // Gana un 8%, cae un 10%
-        "Alto":  { rentabilidadAnual: 0.15, drawdownMaximo: -0.25 }  // Gana un 15%, pero puede caer un 25%
-    };
+exports.calcularProyeccion = async (capital, beneficioEsperado, riesgo) => {
+    
+    // 1. Pedimos a la BD todos los activos que coincidan con el riesgo elegido
+    const { data: activosDb, error } = await activosDao.getActivosByRiesgo(riesgo);
+    
+    if (error || !activosDb || activosDb.length === 0) {
+        throw new Error(`No hay activos guardados en la base de datos para el riesgo: ${riesgo}`);
+    }
 
-    const perfil = metricasRiesgo[riesgo];
-    if (!perfil) throw new Error("Nivel de riesgo no válido");
+    
+    // 2. Calculamos los pesos (Ponderación Inversa al Riesgo) y las medias reales
+    let sumaInversos = 0;
 
+    // Paso A: Calcular el inverso del riesgo (drawdown) de cada activo
+    activosDb.forEach(activo => {
+        // Usamos Math.abs para quitar el negativo. Si es 0, usamos 0.01 para no dividir por cero
+        const dd = Math.abs(activo.drawdown || 0.01);
+        activo.inversoDrawdown = 1 / dd;
+        sumaInversos += activo.inversoDrawdown;
+    });
+
+    let rentabilidadMediaReal = 0;
+    let drawdownMedioReal = 0;
+
+    // Paso B: Asignar el porcentaje de dinero a cada activo y calcular la media global
+    const carteraRecomendada = activosDb.map(activo => {
+        const peso = activo.inversoDrawdown / sumaInversos; // Nos da un porcentaje de 0 a 1
+
+        // Sumamos a la media global la parte proporcional de este activo
+        rentabilidadMediaReal += (activo.rentabilidad || 0) * peso;
+        drawdownMedioReal += (activo.drawdown || 0) * peso;
+
+        // Calculamos el dinero exacto que toca poner en este activo
+        const dineroAsignado = capital * peso;
+
+        return {
+            simbolo: activo.simbolo,
+            nombre: activo.nombre,
+            rentabilidadAsignada: `${((activo.rentabilidad || 0) * 100).toFixed(2)}%`,
+            pesoCartera: `${(peso * 100).toFixed(2)}%`,
+            capitalAsignado: `${dineroAsignado.toFixed(2)} €`
+        };
+    });
+
+    // 3. Aplicamos la matemática de proyección con las medias ponderadas
     const objetivoTotal = capital + beneficioEsperado;
     let capitalActual = capital;
     let año = 0;
-    
-    // Aquí guardaremos los puntos exactos para pintar la gráfica
     const datosGrafica = [{ año: 0, valor: capital }];
 
-    // 2. Simulamos el paso del tiempo hasta alcanzar el objetivo
-    // Le ponemos un límite de 50 años para que el servidor no se quede pillado en un bucle infinito
     while (capitalActual < objetivoTotal && año < 50) {
         año++;
-        
-        // Aplicamos la rentabilidad de ese año
-        capitalActual = capitalActual * (1 + perfil.rentabilidadAnual);
+        capitalActual = capitalActual * (1 + rentabilidadMediaReal);
 
-        // Simulamos un Drawdown (caída del mercado) cada 3 años para darle realismo a la gráfica
         if (año % 3 === 0) {
-            capitalActual = capitalActual * (1 + perfil.drawdownMaximo);
+            capitalActual = capitalActual * (1 + drawdownMedioReal);
         }
 
-        // Guardamos el punto exacto de este año para la gráfica
         datosGrafica.push({ 
             año: año, 
-            valor: parseFloat(capitalActual.toFixed(2)) // Redondeamos a 2 decimales
+            valor: parseFloat(capitalActual.toFixed(2)) 
         });
     }
 
-    // 3. Empaquetamos todo listo para el Frontend
+    // 4. Empaquetado todo listo para el Frontend
     return {
         parametros: { capitalInicial: capital, objetivo: objetivoTotal, riesgoElegido: riesgo },
         resultados: {
             añosEstimados: año,
-            mensaje: `Alcanzarás tu objetivo en aproximadamente ${año} años asumiendo un riesgo ${riesgo}.`,
-            rentabilidadMediaAplicada: `${perfil.rentabilidadAnual * 100}%`,
-            peorCaidaEstimada: `${perfil.drawdownMaximo * 100}%`
+            rentabilidadMediaAplicada: `${(rentabilidadMediaReal * 100).toFixed(2)}%`,
+            peorCaidaEstimada: `${(drawdownMedioReal * 100).toFixed(2)}%`
         },
-        historicoGrafica: datosGrafica // <--- ESTO ES LO QUE MARCOS NECESITA
+        cartera: carteraRecomendada, 
+        historicoGrafica: datosGrafica
     };
 };

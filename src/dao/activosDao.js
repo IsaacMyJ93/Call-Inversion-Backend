@@ -56,10 +56,25 @@ async function deleteActivo(id) {
         .eq('id', id);
 }
 
+/**
+ * Consulta la base de datos y obtiene una lista de activos filtrados por nivel de riesgo.
+ * * @async
+ * @function getActivosByRiesgo
+ * @param {string} nivelRiesgo - El nivel de riesgo deseado para filtrar los activos (ej. "Bajo", "Medio", "Alto").
+ * @returns {Promise<{data: Array<Object>|null, error: Object|null}>} Promesa que resuelve con un objeto de Supabase que contiene el array de activos encontrados o el error de la consulta.
+ */
+async function getActivosByRiesgo(nivelRiesgo) {
+    return await supabase
+        .from('activos')
+        .select('*')
+        .eq('riesgo', nivelRiesgo); // Filtra: "Dame solo los de riesgo Alto/Medio/Bajo"
+}
+
 module.exports = {
     getAllActivos,
     createActivo,
     updateActivo,
-    deleteActivo
+    deleteActivo,
+    getActivosByRiesgo
 };
 
